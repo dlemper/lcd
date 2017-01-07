@@ -1,7 +1,7 @@
 'use strict';
 
 var EventEmitter = require('events').EventEmitter,
-  Gpio = require('onoff').Gpio,
+  rpio = require('rpio'),
   Q = require('q'),
   util = require('util'),
   tick = global.setImmediate || process.nextTick;
@@ -39,12 +39,24 @@ function Lcd(config) {
   this.rows = config.rows || 1;
   this.largeFont = !!config.largeFont;
 
-  this.rs = new Gpio(config.rs, 'low'); // reg. select, output, initially low
-  this.e = new Gpio(config.e, 'low'); // enable, output, initially low
+  rpio.open(config.rs, rpio.OUTPUT, rpio.LOW); // reg. select, output, initially low
+  this.rs = {
+    writeSync: value => rpio.write(config.rs, value),
+    unexport: () => {};
+  };
+  rpio.open(config.e, rpio.OUTPUT, rpio.LOW); // enable, output, initially low
+  this.e = {
+    writeSync: value => rpio.write(config.e, value),
+    unexport: () => {};
+  };
 
   this.data = []; // data bus, db4 thru db7, outputs, initially low
   for (i = 0; i < config.data.length; i += 1) {
-    this.data.push(new Gpio(config.data[i], 'low'));
+    rpio.open(config.data[i], rpio.OUTPUT, rpio.LOW);
+    this.data.push({
+      writeSync: value => rpio.write(config.data[i], value),
+      unexport: () => {};
+    });
   }
 
   this.displayControl = 0x0c; // display on, cursor off, cursor blink off
@@ -302,4 +314,3 @@ Lcd.prototype._write4Bits = function (val) {
   this.e.writeSync(1);
   this.e.writeSync(0);
 };
-
