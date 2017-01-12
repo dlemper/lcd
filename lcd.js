@@ -52,10 +52,11 @@ function Lcd(config) {
 
   this.data = []; // data bus, db4 thru db7, outputs, initially low
   for (i = 0; i < config.data.length; i += 1) {
-    rpio.open(config.data[i], rpio.OUTPUT, rpio.LOW);
+    const pin = config.data[i];
+    rpio.open(pin, rpio.OUTPUT, rpio.LOW);
     this.data.push({
-      writeSync: value => rpio.write(config.data[i], value),
-      unexport: () => rpio.close(config.data[i]),
+      writeSync: value => rpio.write(pin, value),
+      unexport: () => rpio.close(pin),
     });
   }
 
