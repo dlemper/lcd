@@ -42,12 +42,12 @@ function Lcd(config) {
   rpio.open(config.rs, rpio.OUTPUT, rpio.LOW); // reg. select, output, initially low
   this.rs = {
     writeSync: value => rpio.write(config.rs, value),
-    unexport: () => {},
+    unexport: () => rpio.close(config.rs),
   };
   rpio.open(config.e, rpio.OUTPUT, rpio.LOW); // enable, output, initially low
   this.e = {
     writeSync: value => rpio.write(config.e, value),
-    unexport: () => {},
+    unexport: () => rpio.close(config.e),
   };
 
   this.data = []; // data bus, db4 thru db7, outputs, initially low
@@ -55,7 +55,7 @@ function Lcd(config) {
     rpio.open(config.data[i], rpio.OUTPUT, rpio.LOW);
     this.data.push({
       writeSync: value => rpio.write(config.data[i], value),
-      unexport: () => {},
+      unexport: () => rpio.close(config.data[i]),
     });
   }
 
