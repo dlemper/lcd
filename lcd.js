@@ -310,8 +310,7 @@ Lcd.prototype._write4Bits = function (val) {
   }
 
   // enable pulse >= 300ns
-  // writeSync takes ~10 microseconds to execute on the BBB, so there's
-  // nothing special needed to wait 300 nanoseconds.
   this.e.writeSync(1);
-  this.e.writeSync(0);
+  Q.delay(1)
+  .then(() => this.e.writeSync(0));
 };
