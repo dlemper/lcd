@@ -281,9 +281,9 @@ Lcd.prototype._write = (val) => this._send(val, 1);
 
 // private
 Lcd.prototype._send = (val, mode) => {
-  this.rs.writeSync(mode);
-  this._write4Bits(val >> 4);
-  this._write4Bits(val);
+  this.rs.writeSync(mode)
+  .then(() => this._write4Bits(val >> 4))
+  .then(() => this._write4Bits(val));
 };
 
 // private
