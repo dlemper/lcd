@@ -1,5 +1,6 @@
 'use strict';
 
+const EventEmitter = require('events').EventEmitter;
 const rpio = require('rpio');
 const Q = require('q');
 const util = require('util');
@@ -31,6 +32,8 @@ function Lcd(config) {
   if (!(this instanceof Lcd)) {
     return new Lcd(config);
   }
+
+  EventEmitter.call(this);
 
   this.cols = config.cols || 16; // TODO - Never used, remove?
   this.rows = config.rows || 1;
@@ -65,6 +68,7 @@ function Lcd(config) {
   this.init();
 }
 
+util.inherits(Lcd, EventEmitter);
 module.exports = Lcd;
 
 // private
@@ -92,10 +96,11 @@ Lcd.prototype.init = () => {
   .then(() => this._command(this.displayControl))
   .then(() => this._command(this.displayMode))
   .then(() => this._command(0x01)) // clear display (don't call clear to avoid event)
-  .delay(3);             // wait > 1.52ms for display to clear
+  .delay(3)             // wait > 1.52ms for display to clear
+  .then(() => this.emit('ready'));
 };
 
-Lcd.prototype.print = (val, cb) => {
+Lcd.prototype.print = (val) => {
   val += '';
 
   // If n*80+m characters should be printed, where n>1, m<80, don't display the
