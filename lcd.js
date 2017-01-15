@@ -72,9 +72,9 @@ util.inherits(Lcd, EventEmitter);
 module.exports = Lcd;
 
 // private
-Lcd.prototype.init = () => {
+Lcd.prototype.init = function () {
   Q.delay(16)                                               // wait > 15ms
-  .then(() => this._write4Bits(0x03)) // 1st wake up
+  .then(() => this._write4Bits(0x03) // 1st wake up
   .delay(6)                                                 // wait > 4.1ms
   .then(() => this._write4Bits(0x03)) // 2nd wake up
   .delay(2)                                                 // wait > 160us
@@ -97,10 +97,11 @@ Lcd.prototype.init = () => {
   .then(() => this._command(this.displayMode))
   .then(() => this._command(0x01)) // clear display (don't call clear to avoid event)
   .delay(3)             // wait > 1.52ms for display to clear
-  .then(() => this.emit('ready'));
+  .then(() => this.emit('ready'))
+  .catch(err => console.error(err));
 };
 
-Lcd.prototype.print = (val) => {
+Lcd.prototype.print = function (val) {
   val += '';
 
   // If n*80+m characters should be printed, where n>1, m<80, don't display the
@@ -113,73 +114,84 @@ Lcd.prototype.print = (val) => {
 };
 
 // private
-Lcd.prototype._printChar = (str, index) => this._write(str.charCodeAt(index)).then(() => this._printChar(str, index + 1));
+Lcd.prototype._printChar = function (str, index) {
+  return this._write(str.charCodeAt(index))
+  .then(() => this._printChar(str, index + 1));
+};
 
-Lcd.prototype.clear = () => this._commandAndDelay(__COMMANDS.CLEAR_DISPLAY, 3);
+Lcd.prototype.clear = function () {
+  return this._commandAndDelay(__COMMANDS.CLEAR_DISPLAY, 3);
+};
 
-Lcd.prototype.home = () => this._commandAndDelay(__COMMANDS.HOME, 3);
+Lcd.prototype.home = function () {
+  return this._commandAndDelay(__COMMANDS.HOME, 3);
+};
 
-Lcd.prototype.setCursor = (col, row) => {
+Lcd.prototype.setCursor = function (col, row) {
   const r = row > this.rows ? this.rows - 1 : row; //TODO: throw error instead? Seems like this could cause a silent bug.
   //we don't check for column because scrolling is a possibility. Should we check if it's in range if scrolling is off?
   return this._command(__COMMANDS.SET_CURSOR | (col + __ROW_OFFSETS[r]));
 };
 
-Lcd.prototype.display = () => {
+Lcd.prototype.display = function () {
   this.displayControl |= __COMMANDS.DISPLAY_ON;
   return this._command(this.displayControl);
 };
 
-Lcd.prototype.noDisplay = () => {
+Lcd.prototype.noDisplay = function () {
   this.displayControl &= __COMMANDS.DISPLAY_OFF;
   return this._command(this.displayControl);
 };
 
-Lcd.prototype.cursor = () => {
+Lcd.prototype.cursor = function () {
   this.displayControl |= __COMMANDS.CURSOR_ON;
   return this._command(this.displayControl);
 };
 
-Lcd.prototype.noCursor = () => {
+Lcd.prototype.noCursor = function () {
   this.displayControl &= __COMMANDS.CURSOR_OFF;
   return this._command(this.displayControl);
 };
 
-Lcd.prototype.blink = () => {
+Lcd.prototype.blink = function () {
   this.displayControl |= __COMMANDS.BLINK_ON;
   return this._command(this.displayControl);
 };
 
-Lcd.prototype.noBlink = () => {
+Lcd.prototype.noBlink = function () {
   this.displayControl &= __COMMANDS.BLINK_OFF;
   return this._command(this.displayControl);
 };
 
-Lcd.prototype.scrollDisplayLeft = () => this._command(__COMMANDS.SCROLL_LEFT);
+Lcd.prototype.scrollDisplayLeft = function () {
+  return this._command(__COMMANDS.SCROLL_LEFT);
+};
 
-Lcd.prototype.scrollDisplayRight = () => this._command(__COMMANDS.SCROLL_RIGHT);
+Lcd.prototype.scrollDisplayRight = function () {
+  return this._command(__COMMANDS.SCROLL_RIGHT);
+};
 
-Lcd.prototype.leftToRight = () => {
+Lcd.prototype.leftToRight = function () {
   this.displayMode |= __COMMANDS.LEFT_TO_RIGHT;
   return this._command(this.displayMode);
 };
 
-Lcd.prototype.rightToLeft = () => {
+Lcd.prototype.rightToLeft = function () {
   this.displayMode &= __COMMANDS.RIGHT_TO_LEFT;
   return this._command(this.displayMode);
 };
 
-Lcd.prototype.autoscroll = () => {
+Lcd.prototype.autoscroll = function () {
   this.displayMode |= __COMMANDS.AUTOSCROLL_ON;
   return this._command(this.displayMode);
 };
 
-Lcd.prototype.noAutoscroll = () => {
+Lcd.prototype.noAutoscroll = function () {
   this.displayMode &= __COMMANDS.AUTOSCROLL_OFF;
   return this._command(this.displayMode);
 };
 
-Lcd.prototype.close = () => {
+Lcd.prototype.close = function () {
   this.rs.unexport();
   this.e.unexport();
 
@@ -189,23 +201,29 @@ Lcd.prototype.close = () => {
 };
 
 // private
-Lcd.prototype._commandAndDelay = (command, timeout) => this._command(command).then(() => Q.delay(timeout));
+Lcd.prototype._commandAndDelay = function (command, timeout) {
+  return this._command(command).then(() => Q.delay(timeout));
+};
 
 // private
-Lcd.prototype._command = (cmd) => this._send(cmd, 0);
+Lcd.prototype._command = function (cmd) {
+  return this._send(cmd, 0);
+};
 
 // private
-Lcd.prototype._write = (val) => this._send(val, 1);
+Lcd.prototype._write = function (val) {
+  return this._send(val, 1);
+};
 
 // private
-Lcd.prototype._send = (val, mode) => {
-  this.rs.writeSync(mode)
+Lcd.prototype._send = function (val, mode) {
+  return this.rs.writeSync(mode)
   .then(() => this._write4Bits(val >> 4))
   .then(() => this._write4Bits(val));
 };
 
 // private
-Lcd.prototype._write4Bits = (val) => {
+Lcd.prototype._write4Bits = function (val) {
   if (!(typeof val === 'number')) {
     throw new Error("Value passed to ._write4Bits must be a number");
   }
