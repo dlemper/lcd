@@ -41,12 +41,12 @@ function Lcd(config) {
 
   rpio.open(config.rs, rpio.OUTPUT, rpio.LOW); // reg. select, output, initially low
   this.rs = {
-    writeSync: value => rpio.write(config.rs, value),
+    writeSync: value => new Promise(resolve => resolve(rpio.write(config.rs, value))),
     unexport: () => rpio.close(config.rs),
   };
   rpio.open(config.e, rpio.OUTPUT, rpio.LOW); // enable, output, initially low
   this.e = {
-    writeSync: value => rpio.write(config.e, value),
+    writeSync: value => new Promise(resolve => resolve(rpio.write(config.e, value))),
     unexport: () => rpio.close(config.e),
   };
 
@@ -55,7 +55,7 @@ function Lcd(config) {
     const pin = config.data[i];
     rpio.open(pin, rpio.OUTPUT, rpio.LOW);
     this.data.push({
-      writeSync: value => rpio.write(pin, value),
+      writeSync: value => new Promise(resolve => resolve(rpio.write(pin, value))),
       unexport: () => rpio.close(pin),
     });
   }
@@ -74,7 +74,7 @@ module.exports = Lcd;
 // private
 Lcd.prototype.init = function () {
   Q.delay(16)                                               // wait > 15ms
-  .then(() => this._write4Bits(0x03) // 1st wake up
+  .then(() => this._write4Bits(0x03)) // 1st wake up
   .delay(6)                                                 // wait > 4.1ms
   .then(() => this._write4Bits(0x03)) // 2nd wake up
   .delay(2)                                                 // wait > 160us
