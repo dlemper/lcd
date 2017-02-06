@@ -6,7 +6,7 @@ const Q = require('q');
 const util = require('util');
 const tick = global.setImmediate || process.nextTick;
 
-const delay = (time) => new Promise(fulfill => setTimeout(fulfill, time));
+const delay = (time, ...args) => new Promise(resolve => setTimeout(resolve, time, ...args));
 
 const __ROW_OFFSETS = [0x00, 0x40, 0x14, 0x54];
 
@@ -116,7 +116,7 @@ Lcd.prototype.print = function (val) {
 // private
 Lcd.prototype._printChar = function (str, index) {
   return this._write(str.charCodeAt(index))
-  .then(() => this._printChar(str, index + 1));
+  .then(() => (index + 1) < str.length? this._printChar(str, index + 1) : 'done');
 };
 
 Lcd.prototype.clear = function () {
@@ -202,7 +202,8 @@ Lcd.prototype.close = function () {
 
 // private
 Lcd.prototype._commandAndDelay = function (command, timeout) {
-  return this._command(command).then(() => Q.delay(timeout));
+  return this._command(command)
+  .then(() => delay(timeout));
 };
 
 // private
@@ -219,7 +220,7 @@ Lcd.prototype._write = function (val) {
 Lcd.prototype._send = function (val, mode) {
   return this.rs.writeSync(mode)
   .then(() => this._write4Bits(val >> 4))
-  .then(() => this._write4Bits(val));
+  .then(() => this._write4Bits(val & 15));
 };
 
 // private
@@ -237,6 +238,6 @@ Lcd.prototype._write4Bits = function (val) {
   // enable pulse >= 300ns
   return Promise.all(dataProm)
   .then(() => this.e.writeSync(1))
-  .then(() => delay(30))
+  .then(() => delay(1))
   .then(() => this.e.writeSync(0));
 };
