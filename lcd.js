@@ -8,7 +8,7 @@ const tick = global.setImmediate || process.nextTick;
 
 const delay = (time, ...args) => new Promise(resolve => setTimeout(resolve, time, ...args));
 
-const __ROW_OFFSETS = [0x00, 0x40, 0x14, 0x54];
+const __ROW_OFFSETS = [0x00, 0x40, 0x10, 0x50]; // TODO: make this configurable, as the original values ([0x00, 0x40, 0x14, 0x54]) weren't correct
 
 const __COMMANDS = {
   CLEAR_DISPLAY: 0x01,
