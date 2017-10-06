@@ -1,16 +1,15 @@
 'use strict';
 
-const EventEmitter = require('events').EventEmitter;
 const rpio = require('rpio');
-const Q = require('q');
 const util = require('util');
 const tick = global.setImmediate || process.nextTick;
 
 const delay = (time, ...args) => new Promise(resolve => setTimeout(resolve, time, ...args));
+const sequentialPromises = funcs => funcs.reduce((promise, func) => promise.then(result => func().then(Array.prototype.concat.bind(result))), Promise.resolve([]));
 
-const __ROW_OFFSETS = [0x00, 0x40, 0x10, 0x50]; // TODO: make this configurable, as the original values ([0x00, 0x40, 0x14, 0x54]) weren't correct
+const ROW_OFFSETS = [0x00, 0x40, 0x10, 0x50]; // TODO: make this configurable, as the original values ([0x00, 0x40, 0x14, 0x54]) weren't correct
 
-const __COMMANDS = {
+const COMMANDS = {
   CLEAR_DISPLAY: 0x01,
   HOME: 0x02,
   SET_CURSOR: 0x80,
@@ -25,219 +24,158 @@ const __COMMANDS = {
   LEFT_TO_RIGHT: 0x02,
   RIGHT_TO_LEFT: ~0x02,
   AUTOSCROLL_ON: 0x01,
-  AUTOSCROLL_OFF: ~0x01
+  AUTOSCROLL_OFF: ~0x01,
 };
 
-function Lcd(config) {
-  if (!(this instanceof Lcd)) {
-    return new Lcd(config);
+class Lcd {
+  constructor() {
+    this.displayControl = 0x0c; // display on, cursor off, cursor blink off
+    this.displayMode = 0x06; // left to right, no shift
   }
 
-  EventEmitter.call(this);
+  init(config) {
+    this.rows = config.rows || 1;
+    this.largeFont = !!config.largeFont;
 
-  this.cols = config.cols || 16; // TODO - Never used, remove?
-  this.rows = config.rows || 1;
-  this.largeFont = !!config.largeFont;
+    this.rs = this._configurePin(config.rs);
+    this.e = this._configurePin(config.e);
+    this.data = config.data.map(pin => this._configurePin(pin));
 
-  rpio.open(config.rs, rpio.OUTPUT, rpio.LOW); // reg. select, output, initially low
-  this.rs = {
-    writeSync: value => new Promise(resolve => resolve(rpio.write(config.rs, value))),
-    unexport: () => rpio.close(config.rs),
-  };
-  rpio.open(config.e, rpio.OUTPUT, rpio.LOW); // enable, output, initially low
-  this.e = {
-    writeSync: value => new Promise(resolve => resolve(rpio.write(config.e, value))),
-    unexport: () => rpio.close(config.e),
-  };
+    return delay(16)                    // wait > 15ms
+      .then(() => this._write4Bits(0x03)) // 1st wake up
+      .then(() => delay(6))               // wait > 4.1ms
+      .then(() => this._write4Bits(0x03)) // 2nd wake up
+      .then(() => delay(2))               // wait > 160us
+      .then(() => this._write4Bits(0x03)) // 3rd wake up
+      .then(() => delay(2))               // wait > 160us
+      .then(() => this._write4Bits(0x02)) // 4 bit interface
+      .then(() => this._send(0x20 | ((this.rows > 1) ? 0x08 : 0x00) | ((this.rows === 1 && this.largeFont) ? 0x24 : 0x00)))
+      .then(() => this._send(0x10))
+      .then(() => this._send(this.displayControl))
+      .then(() => this._send(this.displayMode))
+      .then(() => this._send(0x01)) // clear display (don't call clear to avoid event)
+      .then(() => delay(3))            // wait > 1.52ms for display to clear
+      .catch(console.error);
+  }
 
-  this.data = []; // data bus, db4 thru db7, outputs, initially low
-  for (let i = 0; i < config.data.length; i += 1) {
-    const pin = config.data[i];
-    rpio.open(pin, rpio.OUTPUT, rpio.LOW);
-    this.data.push({
-      writeSync: value => new Promise(resolve => resolve(rpio.write(pin, value))),
+  print(val) {
+    val += '';
+
+    // If n*80+m characters should be printed, where n>1, m<80, don't display the
+    // first (n-1)*80 characters as they will be overwritten. For example, if
+    // asked to print 802 characters, don't display the first 720.
+    const displayFills = Math.floor(val.length / 80);
+    const index = displayFills > 1 ? (displayFills - 1) * 80 : 0;
+
+    return sequentialPromises(val.split('').map(n => () => this._send(n.charCodeAt(0), 1)));
+  }
+
+  clear() {
+    return this._send(COMMANDS.CLEAR_DISPLAY)
+      .then(() => delay(3));
+  }
+
+  home() {
+    return this._send(COMMANDS.HOME)
+      .then(() => delay(3));
+  }
+
+  setCursor(col, row) {
+    const r = row > this.rows ? this.rows - 1 : row; //TODO: throw error instead? Seems like this could cause a silent bug.
+    //we don't check for column because scrolling is a possibility. Should we check if it's in range if scrolling is off?
+    return this._send(COMMANDS.SET_CURSOR | (col + ROW_OFFSETS[r]));
+  }
+
+  display() {
+    this.displayControl |= COMMANDS.DISPLAY_ON;
+    return this._send(this.displayControl);
+  }
+
+  noDisplay() {
+    this.displayControl &= COMMANDS.DISPLAY_OFF;
+    return this._send(this.displayControl);
+  }
+
+  cursor() {
+    this.displayControl |= COMMANDS.CURSOR_ON;
+    return this._send(this.displayControl);
+  }
+
+  noCursor() {
+    this.displayControl &= COMMANDS.CURSOR_OFF;
+    return this._send(this.displayControl);
+  }
+
+  blink() {
+    this.displayControl |= COMMANDS.BLINK_ON;
+    return this._send(this.displayControl);
+  }
+
+  noBlink() {
+    this.displayControl &= COMMANDS.BLINK_OFF;
+    return this._send(this.displayControl);
+  }
+
+  scrollDisplayLeft() {
+    return this._send(COMMANDS.SCROLL_LEFT);
+  }
+
+  scrollDisplayRight() {
+    return this._send(COMMANDS.SCROLL_RIGHT);
+  }
+
+  leftToRight() {
+    this.displayMode |= COMMANDS.LEFT_TO_RIGHT;
+    return this._send(this.displayMode);
+  }
+
+  rightToLeft() {
+    this.displayMode &= COMMANDS.RIGHT_TO_LEFT;
+    return this._send(this.displayMode);
+  }
+
+  autoscroll() {
+    this.displayMode |= COMMANDS.AUTOSCROLL_ON;
+    return this._send(this.displayMode);
+  }
+
+  noAutoscroll() {
+    this.displayMode &= COMMANDS.AUTOSCROLL_OFF;
+    return this._send(this.displayMode);
+  }
+
+  close() {
+    this.rs.unexport();
+    this.e.unexport();
+    this.data.forEach(n => n.unexport());
+  }
+
+  _configurePin(pin) {
+    rpio.open(pin, rpio.OUTPUT, rpio.LOW); // reg. select, output, initially low
+    return {
+      writeSync: value => Promise.resolve(rpio.write(pin, value)),
       unexport: () => rpio.close(pin),
-    });
+    };
   }
 
-  this.displayControl = 0x0c; // display on, cursor off, cursor blink off
-  this.displayMode = 0x06; // left to right, no shift
+  _send(val, mode = 0) {
+    return this.rs.writeSync(mode)
+      .then(() => this._write4Bits(val >> 4))
+      .then(() => this._write4Bits(val & 15))
+      .catch(console.error);
+  }
 
-  this.asyncOps = [];
+  _write4Bits(val) {
+    if (!(typeof val === 'number')) {
+      throw new Error("Value passed to ._write4Bits must be a number");
+    }
 
-  this.init();
+    return Promise.all(this.data.map((n, idx) => n.writeSync((val >> idx) & 1)))
+      .then(() => this.e.writeSync(1))
+      .then(() => delay(1)) // enable pulse >= 300ns
+      .then(() => this.e.writeSync(0))
+      .catch(console.error);
+  }
 }
 
-util.inherits(Lcd, EventEmitter);
 module.exports = Lcd;
-
-// private
-Lcd.prototype.init = function () {
-  Q.delay(16)                                               // wait > 15ms
-  .then(() => this._write4Bits(0x03)) // 1st wake up
-  .delay(6)                                                 // wait > 4.1ms
-  .then(() => this._write4Bits(0x03)) // 2nd wake up
-  .delay(2)                                                 // wait > 160us
-  .then(() => this._write4Bits(0x03)) // 3rd wake up
-  .delay(2)                                                 // wait > 160us
-  .then(() => this._write4Bits(0x02)) // 4 bit interface
-  .then(() => {
-    var displayFunction = 0x20;
-
-    if (this.rows > 1) {
-      displayFunction |= 0x08;
-    }
-    if (this.rows === 1 && this.largeFont) {
-      displayFunction |= 0x04;
-    }
-    return this._command(displayFunction);
-  })
-  .then(() => this._command(0x10))
-  .then(() => this._command(this.displayControl))
-  .then(() => this._command(this.displayMode))
-  .then(() => this._command(0x01)) // clear display (don't call clear to avoid event)
-  .delay(3)             // wait > 1.52ms for display to clear
-  .then(() => this.emit('ready'))
-  .catch(err => console.error(err));
-};
-
-Lcd.prototype.print = function (val) {
-  val += '';
-
-  // If n*80+m characters should be printed, where n>1, m<80, don't display the
-  // first (n-1)*80 characters as they will be overwritten. For example, if
-  // asked to print 802 characters, don't display the first 720.
-  const displayFills = Math.floor(val.length / 80);
-  const index = displayFills > 1 ? (displayFills - 1) * 80 : 0;
-
-  return this._printChar(val, index);
-};
-
-// private
-Lcd.prototype._printChar = function (str, index) {
-  return this._write(str.charCodeAt(index))
-  .then(() => (index + 1) < str.length? this._printChar(str, index + 1) : 'done');
-};
-
-Lcd.prototype.clear = function () {
-  return this._commandAndDelay(__COMMANDS.CLEAR_DISPLAY, 3);
-};
-
-Lcd.prototype.home = function () {
-  return this._commandAndDelay(__COMMANDS.HOME, 3);
-};
-
-Lcd.prototype.setCursor = function (col, row) {
-  const r = row > this.rows ? this.rows - 1 : row; //TODO: throw error instead? Seems like this could cause a silent bug.
-  //we don't check for column because scrolling is a possibility. Should we check if it's in range if scrolling is off?
-  return this._command(__COMMANDS.SET_CURSOR | (col + __ROW_OFFSETS[r]));
-};
-
-Lcd.prototype.display = function () {
-  this.displayControl |= __COMMANDS.DISPLAY_ON;
-  return this._command(this.displayControl);
-};
-
-Lcd.prototype.noDisplay = function () {
-  this.displayControl &= __COMMANDS.DISPLAY_OFF;
-  return this._command(this.displayControl);
-};
-
-Lcd.prototype.cursor = function () {
-  this.displayControl |= __COMMANDS.CURSOR_ON;
-  return this._command(this.displayControl);
-};
-
-Lcd.prototype.noCursor = function () {
-  this.displayControl &= __COMMANDS.CURSOR_OFF;
-  return this._command(this.displayControl);
-};
-
-Lcd.prototype.blink = function () {
-  this.displayControl |= __COMMANDS.BLINK_ON;
-  return this._command(this.displayControl);
-};
-
-Lcd.prototype.noBlink = function () {
-  this.displayControl &= __COMMANDS.BLINK_OFF;
-  return this._command(this.displayControl);
-};
-
-Lcd.prototype.scrollDisplayLeft = function () {
-  return this._command(__COMMANDS.SCROLL_LEFT);
-};
-
-Lcd.prototype.scrollDisplayRight = function () {
-  return this._command(__COMMANDS.SCROLL_RIGHT);
-};
-
-Lcd.prototype.leftToRight = function () {
-  this.displayMode |= __COMMANDS.LEFT_TO_RIGHT;
-  return this._command(this.displayMode);
-};
-
-Lcd.prototype.rightToLeft = function () {
-  this.displayMode &= __COMMANDS.RIGHT_TO_LEFT;
-  return this._command(this.displayMode);
-};
-
-Lcd.prototype.autoscroll = function () {
-  this.displayMode |= __COMMANDS.AUTOSCROLL_ON;
-  return this._command(this.displayMode);
-};
-
-Lcd.prototype.noAutoscroll = function () {
-  this.displayMode &= __COMMANDS.AUTOSCROLL_OFF;
-  return this._command(this.displayMode);
-};
-
-Lcd.prototype.close = function () {
-  this.rs.unexport();
-  this.e.unexport();
-
-  for (let i = 0; i < this.data.length; i += 1) {
-    this.data[i].unexport();
-  }
-};
-
-// private
-Lcd.prototype._commandAndDelay = function (command, timeout) {
-  return this._command(command)
-  .then(() => delay(timeout));
-};
-
-// private
-Lcd.prototype._command = function (cmd) {
-  return this._send(cmd, 0);
-};
-
-// private
-Lcd.prototype._write = function (val) {
-  return this._send(val, 1);
-};
-
-// private
-Lcd.prototype._send = function (val, mode) {
-  return this.rs.writeSync(mode)
-  .then(() => this._write4Bits(val >> 4))
-  .then(() => this._write4Bits(val & 15));
-};
-
-// private
-Lcd.prototype._write4Bits = function (val) {
-  if (!(typeof val === 'number')) {
-    throw new Error("Value passed to ._write4Bits must be a number");
-  }
-
-  const dataProm = [];
-
-  for (let i = 0; i < this.data.length; i += 1, val = val >> 1) {
-    dataProm.push(this.data[i].writeSync(val & 1));
-  }
-
-  // enable pulse >= 300ns
-  return Promise.all(dataProm)
-  .then(() => this.e.writeSync(1))
-  .then(() => delay(1))
-  .then(() => this.e.writeSync(0));
-};
